@@ -10,7 +10,7 @@
 
 (function() {
     'use strict';
-
+    alert("IT’S ALIVE!");
     console.log("EdgeBolt Stealth is active");
 
     function trySkip() {
