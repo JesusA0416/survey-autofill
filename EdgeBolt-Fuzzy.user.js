@@ -1,9 +1,8 @@
 // ==UserScript==
-// @name         EdgeBolt Ultimate Stable - AI + Video Skip
+// @name         EdgeBolt Fuzzy Click Fix
 // @namespace    https://chat.openai.com/
-// @version      3.1
-// @description  Auto-answer + stable video bypass for Edgenuity (no crashes on iPad Safari)
-// @author       ChatGPT
+// @version      3.2
+// @description  AI + video skip + fuzzy answer matching (clicks even weird Edgenuity formats)
 // @match        https://student.edgenuity.com/*
 // @match        https://*.learn.edgenuity.com/*
 // @run-at       document-idle
@@ -16,7 +15,7 @@
   let hasAnswered = false;
   let hasSkipped = false;
 
-  const log = (...args) => console.log("[EdgeBolt Stable]", ...args);
+  const log = (...args) => console.log("[EdgeBolt Fuzzy]", ...args);
 
   const getAllDocs = () => {
     const docs = [document];
@@ -45,14 +44,12 @@
 
     let answers = [];
 
-    if (radios.length) {
-      answers = Array.from(radios).map(r =>
-        r.closest("label")?.innerText.trim() || "Option"
-      );
-    } else if (checks.length) {
-      answers = Array.from(checks).map(c =>
-        c.closest("label")?.innerText.trim() || "Option"
-      );
+    if (radios.length || checks.length) {
+      const inputs = radios.length ? radios : checks;
+      inputs.forEach(input => {
+        const label = input.closest("label") || input.parentElement;
+        if (label) answers.push(label.innerText.trim());
+      });
     } else if (selects.length) {
       selects.forEach(sel => {
         const opts = Array.from(sel.options).map(o => o.text.trim());
@@ -66,14 +63,43 @@
     };
   };
 
+  const fuzzyMatch = (text, options) => {
+    const normalized = text.toLowerCase().replace(/[^\w\s]/g, '');
+    for (const opt of options) {
+      const normOpt = opt.toLowerCase().replace(/[^\w\s]/g, '');
+      if (normOpt.includes(normalized) || normalized.includes(normOpt)) {
+        return opt;
+      }
+    }
+    return null;
+  };
+
+  const clickFuzzyAnswer = (doc, bestAnswer) => {
+    const allTextNodes = doc.querySelectorAll("label, span, div, p");
+    for (const node of allTextNodes) {
+      if (!node.innerText) continue;
+      const text = node.innerText.toLowerCase();
+      if (text.includes(bestAnswer.toLowerCase())) {
+        const input = node.querySelector("input");
+        if (input) {
+          input.click();
+          log("Clicked fuzzy-matched input:", node.innerText);
+          return true;
+        } else {
+          node.click();
+          log("Clicked fuzzy-matched node:", node.innerText);
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
   const tryAnswerQuestion = async (doc) => {
     if (hasAnswered) return;
 
     const data = extractQuestion(doc);
     if (!data || !data.answers.length) return;
-
-    hasAnswered = true;
-    log("Question found:", data.prompt);
 
     try {
       const res = await fetch(AI_ENDPOINT, {
@@ -86,24 +112,21 @@
       const best = json.bestAnswer?.toLowerCase().trim();
       if (!best) return;
 
-      const labels = doc.querySelectorAll("label");
-      for (const label of labels) {
-        if (label.innerText.toLowerCase().includes(best)) {
-          const input = label.querySelector("input");
-          if (input) input.click();
-        }
+      const matched = fuzzyMatch(best, data.answers);
+      if (!matched) {
+        log("No fuzzy match found.");
+        return;
       }
 
-      const selects = doc.querySelectorAll("select");
-      selects.forEach(sel => {
-        for (const option of sel.options) {
-          if (option.text.toLowerCase().includes(best)) {
-            sel.value = option.value;
-            sel.dispatchEvent(new Event("change"));
-          }
-        }
-      });
+      const clicked = clickFuzzyAnswer(doc, matched);
+      if (!clicked) {
+        log("Couldn't click the matched answer.");
+        return;
+      }
 
+      hasAnswered = true;
+
+      // Submit
       const btns = doc.querySelectorAll("button");
       for (const btn of btns) {
         if (/submit|done|next/i.test(btn.textContent) && !btn.disabled) {
@@ -119,7 +142,6 @@
 
   const tryVideoSkip = (doc) => {
     if (hasSkipped) return;
-
     const vid = doc.querySelector("video");
     if (vid && !vid.ended) {
       vid.currentTime = vid.duration;
@@ -141,7 +163,6 @@
     for (const doc of docs) {
       tryAnswerQuestion(doc);
       tryVideoSkip(doc);
-
       const next = detectNext(doc);
       if (next && !hasAnswered && !hasSkipped) {
         next.click();
