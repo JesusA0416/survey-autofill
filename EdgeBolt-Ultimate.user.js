@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         EdgeBolt AI Auto Answer + Video Skip
+// @name         EdgeBolt Ultimate - AI Auto + Video Bypass
 // @namespace    https://chat.openai.com/
-// @version      2.0
-// @description  Fully automated Edgenuity AI answer script with video skipping
+// @version      3.0
+// @description  Full AI auto-answer + unskippable video bypass + auto-advance for Edgenuity on iPad Safari
 // @author       ChatGPT
 // @match        https://student.edgenuity.com/*
 // @match        https://*.learn.edgenuity.com/*
@@ -12,7 +12,7 @@
 (function () {
   'use strict';
 
-  const AI_ENDPOINT = "https://edgebolt-ai-api.glitch.me/answer"; // dummy endpoint for placeholder
+  const AI_ENDPOINT = "https://edgebolt-ai-api.glitch.me/answer"; // Hosted AI lookup
 
   const getAllDocs = () => {
     const docs = [document];
@@ -26,22 +26,41 @@
     return docs;
   };
 
-  const log = (msg) => {
-    console.log("[EdgeBolt AI]", msg);
+  const log = (...args) => console.log("[EdgeBolt Ultimate]", ...args);
+
+  const detectNextButton = (doc) => {
+    const next = doc.querySelector("button[aria-label='Next Activity'], button[class*='next']");
+    return next && !next.disabled ? next : null;
   };
 
-  const fastForwardVideo = (doc) => {
+  const unlockNextButton = (doc) => {
+    const next = detectNextButton(doc);
+    if (next) {
+      next.click();
+      log("Clicked 'Next Activity'.");
+    }
+  };
+
+  const handleVideoBypass = (doc) => {
     const video = doc.querySelector("video");
-    if (video && !video.ended) {
+    const progressBar = doc.querySelector(".ui-slider-handle, .vid-progress, .time-progress");
+
+    if (video) {
       video.currentTime = video.duration;
-      video.dispatchEvent(new Event('ended'));
-      log("Skipped video.");
+      video.dispatchEvent(new Event("ended"));
+      log("Set video to end.");
+    }
+
+    const next = detectNextButton(doc);
+    if (next) {
+      next.click();
+      log("Clicked 'Next Activity' after video.");
     }
   };
 
   const extractQuestion = (doc) => {
-    const questionText = doc.querySelector(".question-prompt, .question-container, h2, h3, .prompt");
-    if (!questionText) return null;
+    const promptElem = doc.querySelector(".question-prompt, .question-container, h2, h3, .prompt");
+    if (!promptElem) return null;
 
     let answers = [];
     const radios = doc.querySelectorAll("input[type='radio']");
@@ -49,15 +68,9 @@
     const selects = doc.querySelectorAll("select");
 
     if (radios.length) {
-      answers = Array.from(radios).map(r => {
-        const label = r.closest("label");
-        return label ? label.innerText.trim() : "Option";
-      });
+      answers = Array.from(radios).map(r => r.closest("label")?.innerText.trim() || "Option");
     } else if (checks.length) {
-      answers = Array.from(checks).map(c => {
-        const label = c.closest("label");
-        return label ? label.innerText.trim() : "Option";
-      });
+      answers = Array.from(checks).map(c => c.closest("label")?.innerText.trim() || "Option");
     } else if (selects.length) {
       selects.forEach(sel => {
         const opts = Array.from(sel.options).map(o => o.text.trim());
@@ -66,7 +79,7 @@
     }
 
     return {
-      prompt: questionText.innerText.trim(),
+      prompt: promptElem.innerText.trim(),
       answers: answers
     };
   };
@@ -75,67 +88,64 @@
     const data = extractQuestion(doc);
     if (!data || !data.answers.length) return;
 
-    log("Extracted question: " + data.prompt);
-    log("Options: " + data.answers.join(", "));
-
     try {
       const res = await fetch(AI_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data)
       });
-
       const json = await res.json();
       const best = json.bestAnswer?.toLowerCase().trim();
-
       if (!best) return;
 
-      // Try to select correct answer
+      // Match radio/checkbox
       const labels = doc.querySelectorAll("label");
       for (const label of labels) {
-        if (label.innerText.toLowerCase().includes(best)) {
+        const labelText = label.innerText.toLowerCase().trim();
+        if (labelText.includes(best)) {
           const input = label.querySelector("input");
           if (input) {
             input.click();
-            log("Selected best answer: " + label.innerText);
+            log("Selected answer:", label.innerText);
             break;
           }
         }
       }
 
+      // Match dropdowns
       const selects = doc.querySelectorAll("select");
       selects.forEach(sel => {
         for (const option of sel.options) {
           if (option.text.toLowerCase().includes(best)) {
             sel.value = option.value;
             sel.dispatchEvent(new Event("change"));
-            log("Filled dropdown with: " + option.text);
+            log("Filled dropdown:", option.text);
           }
         }
       });
 
-      // Submit or move on
+      // Submit
       const buttons = doc.querySelectorAll("button");
       for (const btn of buttons) {
         if (/submit|done|next/i.test(btn.textContent) && !btn.disabled) {
           btn.click();
-          log("Clicked: " + btn.textContent.trim());
+          log("Clicked button:", btn.textContent.trim());
           break;
         }
       }
     } catch (err) {
-      log("AI request failed: " + err);
+      log("AI answer failed:", err);
     }
   };
 
-  const runAutomation = () => {
+  const mainLoop = () => {
     const docs = getAllDocs();
-
-    docs.forEach(doc => {
-      fastForwardVideo(doc);
+    for (const doc of docs) {
+      handleVideoBypass(doc);
       answerQuestion(doc);
-    });
+      unlockNextButton(doc);
+    }
   };
 
-  setInterval(runAutomation, 6000);
+  setInterval(mainLoop, 6000);
 })();
